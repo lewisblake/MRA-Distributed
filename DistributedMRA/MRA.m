@@ -21,21 +21,13 @@ optionalArguments(1 : numVarArgsIn) = varargin;
 %totalRegions = sum(nRegions);
 cumulativeRegions = cumsum(nRegions);
 nLevelToBeginInParallel = nLevelsInSerial + 1;
-nTilesAssignedToEachWorker = nRegions(nLevelToBeginInParallel)/nWorkersUsed; % Set number of tiles each worker is responsible for
-firstIndexOfLevelToBeginInParallel = NUM_PARTITIONS_J^(nLevelToBeginInParallel-1); % Find a cleaner way to find correct index!!
-indexsOfAllChildrenOnThisBranch = find_branch_children(firstIndexOfLevelToBeginInParallel,nRegions, NUM_PARTITIONS_J, NUM_LEVELS_M);
-nRegionsInBranch = length(indexsOfAllChildrenOnThisBranch);
-nRegionsAboveBranch = length(find_ancestry(firstIndexOfLevelToBeginInParallel, nRegions, NUM_PARTITIONS_J));
-%nTotalRegionsInBranch = nRegionsAboveBranch + nRegionsInBranch;
+logLikelihoodSum = 0;
 nRegionsAtFinestLevelForEachWorker = (nRegions(NUM_LEVELS_M)/nWorkersUsed);
 % 1/7 LB: Calculate quantities needed for nTotalRegionsAssignedToEachWorker
 maxLevelOnASingleRow = sum(nRegions <= nWorkersUsed); % How many times indices from a level are assigned to a worker
 counter = 1:(NUM_LEVELS_M - maxLevelOnASingleRow);
 nTotalRegionsAssignedToEachWorker = maxLevelOnASingleRow + sum(NUM_PARTITIONS_J.^counter);
-%nTotalRegionsAssignedToEachWorker = nRegionsAboveBranch + nTilesAssignedToEachWorker*nRegionsInBranch; % Should Work? Need verification
-%nRowsWithRepeatedEntriesInIndexMatrix = sum(nRegions < nTilesAssignedToEachWorker);
 nTotalRegionsInSerial = cumulativeRegions(nLevelsInSerial);
-
 
 %% Pre-allocate space for codistributed arrays
 if verbose
@@ -48,7 +40,7 @@ spmd(nWorkersUsed)
     KcB = cell(nTotalRegionsAssignedToEachWorker,  nWorkersUsed, codistributionScheme);
     AtildePrevious = cell(nTotalRegionsAssignedToEachWorker,  nWorkersUsed, codistributionScheme);
     wtildePrevious = cell(nTotalRegionsAssignedToEachWorker,  nWorkersUsed, codistributionScheme);
-    logLikelihood = nan(nTotalRegionsAssignedToEachWorker, nWorkersUsed, codistributionScheme);
+    %logLikelihood = nan(nTotalRegionsAssignedToEachWorker, nWorkersUsed, codistributionScheme);
     if isPredicting % If predicting, pre-allocate space for necessary quantities
         posteriorPredictionMean =  cell(nRegionsAtFinestLevelForEachWorker, nWorkersUsed, codistributionScheme); % Only need to store values at finest resolution
         posteriorPredictionVariance = cell(nRegionsAtFinestLevelForEachWorker, nWorkersUsed, codistributionScheme); % Only need to store values at finest resolution
@@ -58,7 +50,6 @@ spmd(nWorkersUsed)
         KcholA = cell(nTotalRegionsAssignedToEachWorker-nRegionsAtFinestLevelForEachWorker,  nWorkersUsed, codistributionScheme); % LB: Doesn't need to include finest resolution
         Kcholw = cell(nTotalRegionsAssignedToEachWorker-nRegionsAtFinestLevelForEachWorker,  nWorkersUsed, codistributionScheme); % LB: Doesn't need to include entries for finest resolution
     else % Workaround to pass correct object to create_prior
-        % LB: Check this. Not sure the dimensions needed here.
         predictionLocations = num2cell(nan(nTotalRegionsAssignedToEachWorker, nWorkersUsed, codistributionScheme));
     end  
 end
@@ -71,12 +62,16 @@ KcBSerial = cell(nTotalRegionsInSerial, 1);
 
 %% Create the prior distribution
 lastIndexOfSerialLevel = nRegions(nLevelsInSerial+1)-1;
-[lastRowInSerial, lastColInSerial] = find(indexMatrix(:,:) == lastIndexOfSerialLevel,1);% Assuming here that the last region to compute in serial is located in the last indexMatrix column
+[lastRowInSerial, ~] = find(indexMatrix(:,:) == lastIndexOfSerialLevel,1);% Assuming here that the last region to compute in serial is located in the last indexMatrix column
 knotsSubset = gather(knots(1:lastRowInSerial,:));
 indexMatrixSubset = indexMatrix(1:lastRowInSerial,:);
 % Process knots for serial computation
 [ knotsSerial ] = process_knots_for_serial( knotsSubset, indexMatrixSubset, nLevelsInSerial, nRegions);
-disp('Creating the prior in serial ...')
+
+if verbose
+   disp('Creating the prior in serial ...')
+end
+
 for iLevel = 1:nLevelsInSerial
    for jRegion  = (cumulativeRegions(iLevel) - nRegions(iLevel) + 1): cumulativeRegions(iLevel) 
     % Find the ancestry for this jRegion
@@ -98,11 +93,13 @@ for iLevel = 1:nLevelsInSerial
     KcB(firstRowContainingThisRegion, firstColContainingThisRegion:firstColContainingThisRegion + nTimesEachIndexIsRepeatedThisRow - 1) = {thisKcholBchol};    
    end
 end
-knotsSubset = []; knotsSerial = []; % To save memory?
-disp('Serial section of the prior complete.');
-disp('Creating the prior in parallel ...');
+knotsSubset = []; knotsSerial = []; indexMatrixSubset = []; KcBSerial = []; % To save memory
+if verbose
+   disp('Serial section of the prior complete.');
+   disp('Creating the prior in parallel ...');
+end
 % Finish calculating prior in parallel
-spmd(nWorkersUsed) %nWorkersUsed
+spmd(nWorkersUsed)
     % In parallel, loop over indexMatrix rows
     mCounterIndex = 1;
     for iIndexMatrixRow = lastRowInSerial+1:nTotalRegionsAssignedToEachWorker
@@ -140,7 +137,7 @@ spmd(nWorkersUsed) %nWorkersUsed
                 posteriorPredictionVariance(mCounterIndex, labindex) = {thisRetLikPred{2}};
                 Btilde(mCounterIndex, labindex) = {thisRetLikPred{3}};
             else % If not predicting
-                logLikelihood(iIndexMatrixRow,labindex) = thisRetLikPred;
+                logLikelihoodSum = logLikelihoodSum + thisRetLikPred;
             end     
             mCounterIndex = mCounterIndex + 1;
         end
@@ -148,16 +145,16 @@ spmd(nWorkersUsed) %nWorkersUsed
         KcB(iIndexMatrixRow, labindex) = {thisKcholBchol};
     end 
 end
-disp('Parallel section of the prior complete.');
+
+if verbose
+   disp('Parallel section of the prior complete.');
+   disp('Calculating parallel section of the posterior ...');
+end
 
 %% Create the posterior distribution
-disp('Calculating parallel section of the posterior ...');
 lastIndexOfSecondFinestLevel = nRegions(NUM_LEVELS_M)-1;
 lastRowBeforeFinestLevel = find(indexMatrix(:,end)==lastIndexOfSecondFinestLevel);
 spmd(nWorkersUsed)
-%     % Pre-allocate posterior quantities. LB: don't need??
-%     AtildeCurrent = cell(nTotalRegionsAssignedToEachWorker,  nWorkersUsed, codistributionScheme);
-%     wtildeCurrent = cell(nTotalRegionsAssignedToEachWorker,  nWorkersUsed, codistributionScheme);
        
     for iIndexMatrixRow = lastRowBeforeFinestLevel:-1:lastRowInSerial+1
         index = indexMatrix(iIndexMatrixRow, labindex);
@@ -187,12 +184,24 @@ spmd(nWorkersUsed)
             Kcholw(iIndexMatrixRow, labindex) = {Kcholwj};
             KcholA(iIndexMatrixRow, labindex) = {KcholAj};
         else
-            logLikelihood(iIndexMatrixRow,labindex) = logLikelihoodj;
+            logLikelihoodSum = logLikelihoodSum + logLikelihoodj;
         end
     end
 end
-disp('Parallel section of the posterior complete.');
-disp('Calculating the serial section of the posterior ...');
+% Gather logLikelikehoodSum - composite object used to trach likelihood in
+% spmd block
+sumLogLikelihood = 0; % Intialize sumLogLikelihood to collect distributed logLikelihoodSum
+gatheredSum = gather(logLikelihoodSum);
+for iLikelihood = 1:length(gatheredSum)
+    sumLogLikelihood = sumLogLikelihood + gatheredSum{iLikelihood};
+end
+
+if verbose
+   disp('Parallel section of the posterior complete.');
+   % Serial section of the posterior
+   disp('Calculating the serial section of the posterior ...');
+end
+
 % Find the last index of the children of the level at which we begin
 % computing in serial. These children are regions that are within the
 % parallel portion of computations
@@ -224,32 +233,31 @@ for iLevel = nLevelsInSerial:-1:1 % 1/7 LB: changed going from nLevelsInSerial t
         wtildePreviousSerial{jRegion} = wtildeCurrentj;
         AtildePreviousSerial{jRegion} = AtildeCurrentj;
         
-        % 1/7 LB : commeneted out row two below this one and added below
         [firstRowContainingThisRegion,firstColContainingThisRegion] = find(indexMatrixSubset(:,:)==jRegion, 1 );  
-        %firstColContainingThisRegion = find(indexMatrixSubset(iLevel,:)==jRegion, 1 );   
         nTimesEachIndexIsRepeatedThisRow = ceil(nWorkersUsed/nRegions(iLevel)); % 1/7 LB: added ceil() function around calculation
     
-        % This is where some trouble may lie....
-        % Check that iLevel is the row we want..... % 1/7 Lb changed from
-        % iLevel to firstRowContainingThisRegion
-        if isPredicting
+        if isPredicting % If predicting
             RposteriorChol(firstRowContainingThisRegion, firstColContainingThisRegion:firstColContainingThisRegion + nTimesEachIndexIsRepeatedThisRow - 1) = {RposteriorCholj};
             Kcholw(firstRowContainingThisRegion, firstColContainingThisRegion:firstColContainingThisRegion + nTimesEachIndexIsRepeatedThisRow - 1) = {Kcholwj};
             KcholA(firstRowContainingThisRegion, firstColContainingThisRegion:firstColContainingThisRegion + nTimesEachIndexIsRepeatedThisRow - 1) = {KcholAj};
         else
-            logLikelihood(firstRowContainingThisRegion,firstColContainingThisRegion:firstColContainingThisRegion + nTimesEachIndexIsRepeatedThisRow - 1) = logLikelihoodj;
+            sumLogLikelihood = sumLogLikelihood + logLikelihoodj; % Update the sumLoglikelihood 
         end 
         
     end
 end
-disp('Serial section of the posterior complete.');
-% Calculate the sum loglikelihood
-sumLogLikelihood = sum(sum(gather(logLikelihood)));
+% Force freeing up of memory
+indexMatrixSubset = []; wtildeChildrenSubset = []; AtildeChildrenSubset = [];
 
+if verbose
+   disp('Serial section of the posterior complete.');
+end
 
 %% Spatial prediction
 if isPredicting
-    disp('Beginning the spatial prediction ...')
+    if verbose
+       disp('Beginning the spatial prediction ...')
+    end
     spmd(nWorkersUsed)
         for iIndexMatrixRow = lastRowBeforeFinestLevel+1:nTotalRegionsAssignedToEachWorker
             mCounterIndex = iIndexMatrixRow - lastRowBeforeFinestLevel;
@@ -281,7 +289,11 @@ if isPredicting
             end
         end        
     end
-    disp('Spatial prediction complete.');
+    if verbose
+       disp('Spatial prediction complete.');
+    end
 end
-disp('MRA.m execution complete.');
+   if verbose
+      disp('MRA.m execution complete.');
+   end
 end

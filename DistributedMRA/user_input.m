@@ -28,8 +28,8 @@ NUM_LEVELS_M = 16; % Total number of levels. Set to be a natural number. Default
 NUM_PARTITIONS_J = 2; % Number of partitions of each region at each level. Must be 2 or 4. Default is 2.
 NUM_KNOTS_r = 64; % Number of knots per partition. Default is 64.
 offsetPercentage = 0.01; % Offset percentage from partition boundaries. Default is 0.01.
-NUM_WORKERS = 32; % Number of workers in parallel pool. Default is 4.
-nLevelsInSerial = 6; % Number of levels to compute in serial. Default is ??.
+NUM_WORKERS = 64; % Number of workers in parallel pool. Default is 4.
+nLevelsInSerial = 7; % Number of levels to compute in serial. Default is ??.
 resultsFilePath = './Results/';  % By default, results from all routines are saved in the Results folder.
 verbose = false; % Boolean variable indicating whether to display progress indicators. Default is true.
 

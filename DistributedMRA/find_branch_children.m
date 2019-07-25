@@ -20,8 +20,8 @@ for iThisLevel = 1:length(iLevel) % Loop iThisLevel through counter index of lev
     % Store the indices for appropriate level in a vector
     indicesOfRegionsAtThisLevel = indexsOfAllChildrenOnThisBranch(NUM_PARTITIONS_J^(iThisLevel-1): NUM_PARTITIONS_J^(iThisLevel)-1);
     % Then, use jThisRegion to index into this vector and get the actual index
-    % needed to calculate find_children. Append this to SOMETHING
-    for jThisRegion = 1:length(indicesOfRegionsAtThisLevel) % Loop jThisRegion through all region indexs?
+    % needed to calculate find_children. Append this to a vector
+    for jThisRegion = 1:length(indicesOfRegionsAtThisLevel) % Loop jThisRegion through all region indexs
         thisRegion = indicesOfRegionsAtThisLevel(jThisRegion);        
         thisRegionsChildren = find_children(thisRegion, nRegions, NUM_PARTITIONS_J);   
         indexOfAllChildrenForThisLevel = [indexOfAllChildrenForThisLevel; thisRegionsChildren];
@@ -30,5 +30,4 @@ for iThisLevel = 1:length(iLevel) % Loop iThisLevel through counter index of lev
     % containing the indicies of all children on this branch
     indexsOfAllChildrenOnThisBranch = [indexsOfAllChildrenOnThisBranch; indexOfAllChildrenForThisLevel];
 end
-% NEED TO SORT?
 indexsOfAllChildrenOnThisBranch = sort(indexsOfAllChildrenOnThisBranch); % Sort final vector.

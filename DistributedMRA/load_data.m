@@ -38,11 +38,11 @@ switch dataSource
         theta = [2.117,1];
         varEps = 0.001;
         
-        lon = lon(1:6:end);
-        lat = lat(1:6:end);
-        obs = obs(1:6:end);
+        lon = lon(1:3:end);
+        lat = lat(1:3:end);
+        obs = obs(1:3:end);
     otherwise
-        error('Error. Specified dataType is not a valid data set.');
+        error('Error. Specified datType is not a valid data set.');
 end
 disp('Loading data complete');
 

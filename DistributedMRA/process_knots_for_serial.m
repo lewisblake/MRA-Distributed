@@ -1,6 +1,6 @@
 function [ knotsSerial ] = process_knots_for_serial( knotsSubset, indexMatrixSubset, nLevelsInSerial, nRegions)
-%% PROCESS_PRIOR_OBJECTS_FOR_SERIAL
-% This function take the subsets of knots, RpriorChol, KcB, and indexMatrix
+%% PROCESS_KNOTS_FOR_SERIAL
+% This function take the subsets of knots
 % codistributed arrays and processes then into cell arrays on the client
 % for serial computation. The benefit of this is that it reduces the
 % communication overhead caused by repeatedly calling the gather() function

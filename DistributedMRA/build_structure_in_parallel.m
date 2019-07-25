@@ -1,5 +1,5 @@
-function [ knots, partitions, nRegions, outputData, predictionLocations, indexMatrix, nWorkersUsed ] = build_structure_in_parallel( NUM_LEVELS_M, ...
-    NUM_PARTITIONS_J, NUM_KNOTS_r, domainBoundaries, offsetPercentage, nWorkersAssigned, nLevelsInSerial, varargin )
+function [ knots, partitions, nRegions, outputData, predictionLocations, indexMatrix ] = build_structure_in_parallel( NUM_LEVELS_M, ...
+    NUM_PARTITIONS_J, NUM_KNOTS_r, domainBoundaries, offsetPercentage, NUM_WORKERS, nLevelsInSerial, varargin )
 %UNTITLED Summary of this function goes here
 %   Detailed explanation goes here
 %% Check inputs and display progress check
@@ -28,8 +28,8 @@ end
 %% Calculate quantities of interest
 mLevels = 0:NUM_LEVELS_M-1; % Create a vector of levels
 nRegions = NUM_PARTITIONS_J.^mLevels; % Vector of regions (partitions) at each level
-totalRegions = sum(nRegions); % Calculate total number of regions
-cummulativeRegions = cumsum(nRegions);
+%totalRegions = sum(nRegions); % Calculate total number of regions
+%cummulativeRegions = cumsum(nRegions);
 
 
 %% Calculate number of knots in each direction
@@ -41,45 +41,28 @@ else
     nKnotsY0 = NUM_KNOTS_r/nKnotsX0; nKnotsY = NUM_KNOTS_r/nKnotsX;
 end
 
-%% NEW STRATEGY
-
-% From nWorkersAssigned, calculate nWorkersUsed
-nWorkersUsed = nWorkersAssigned; % Hardcoded: need to generalize
-nLevelToBeginInParallel = nLevelsInSerial + 1; % Level to begin computing in parallel is the one directly after we finish computing in serial
 
 % Make assumption that tiles are equally distributed across workers
-nTilesAssignedToEachWorker = nRegions(nLevelToBeginInParallel)/nWorkersUsed; % Set number of tiles each worker is responsible for
-firstIndexOfLevelToBeginInParallel = NUM_PARTITIONS_J^(nLevelsInSerial); % Find a cleaner way to find correct index!!
-% Use the first index from level at which we begin computing in parallel to
-% find the length of the branch "below" that region. The same number will
-% work for all regions at the level at which we begin computing in parallel
-indexsOfAllChildrenOnThisBranch = find_branch_children(firstIndexOfLevelToBeginInParallel,nRegions, NUM_PARTITIONS_J, NUM_LEVELS_M);
-nRegionsInBranch = length(indexsOfAllChildrenOnThisBranch);
-nRegionsAboveBranch = length(find_ancestry(firstIndexOfLevelToBeginInParallel, nRegions, NUM_PARTITIONS_J));
-nTotalRegionsInBranch = nRegionsAboveBranch + nRegionsInBranch;
-%nRegionsAtFinestLevel = nRegions(NUM_LEVELS_M);
-nRegionsAtFinestLevelForEachWorker = (nRegions(NUM_LEVELS_M)/nWorkersUsed);
+nRegionsAtFinestLevelForEachWorker = (nRegions(NUM_LEVELS_M)/NUM_WORKERS);
 % Calculate quantities needed for nTotalRegionsAssignedToEachWorker
-maxLevelOnASingleRow = sum(nRegions <= nWorkersUsed); % How many times indices from a level are assigned to a worker
+maxLevelOnASingleRow = sum(nRegions <= NUM_WORKERS); % How many times indices from a level are assigned to a worker
 counter = 1:(NUM_LEVELS_M - maxLevelOnASingleRow); % Count number of times indicies from a level are going to be repeated in each indexMatrix column
 nTotalRegionsAssignedToEachWorker = maxLevelOnASingleRow + sum(NUM_PARTITIONS_J.^counter);
-%nTotalRegionsAssignedToEachWorker = nRegionsAboveBranch + nTilesAssignedToEachWorker*nRegionsInBranch; % Should Work? Need verification
-
 
 
 %% Create matrix to store continuous index for all regions
-[indexMatrix] = create_indexMatrix( NUM_LEVELS_M, NUM_PARTITIONS_J, nRegions, nWorkersUsed, nLevelsInSerial, nTotalRegionsAssignedToEachWorker);
+[indexMatrix] = create_indexMatrix( NUM_LEVELS_M, NUM_PARTITIONS_J, nRegions, NUM_WORKERS, nLevelsInSerial, nTotalRegionsAssignedToEachWorker);
 % Find the index within the indexMatrix corresponding to the finest level at which the knots are not set to the data.
 indexOfFinestKnotLevelWithinIndexMatrix = find(indexMatrix(:,end)==indexEndFinestKnotLevel);
-nRowsWithRepeatedEntriesInIndexMatrix = sum(nRegions < nWorkersUsed);
+nRowsWithRepeatedEntriesInIndexMatrix = sum(nRegions < NUM_WORKERS);
 %% Pre-allocate memory for codistributed arrays
-spmd(nWorkersUsed)
+spmd(NUM_WORKERS)
     codistributionScheme = codistributor1d(2); % Distribute across the second dimension
     % Create codistributed cell arrays
-    knots = cell(nTotalRegionsAssignedToEachWorker,  nWorkersUsed, codistributionScheme);
-    outputData = cell(nRegionsAtFinestLevelForEachWorker, nWorkersUsed, codistributionScheme);
-    partitions = cell(indexOfFinestKnotLevelWithinIndexMatrix+1,  nWorkersUsed, codistributionScheme); % 12/3: LB changed from nTotalRegionsAssignedToEachWorker. 12/5: last entry in each column is empty
-    predictionLocations = cell(nRegionsAtFinestLevelForEachWorker, nWorkersUsed, codistributionScheme);
+    knots = cell(nTotalRegionsAssignedToEachWorker,  NUM_WORKERS, codistributionScheme);
+    outputData = cell(nRegionsAtFinestLevelForEachWorker, NUM_WORKERS, codistributionScheme);
+    partitions = cell(indexOfFinestKnotLevelWithinIndexMatrix+1,  NUM_WORKERS, codistributionScheme); % 12/3: LB changed from nTotalRegionsAssignedToEachWorker. 12/5: last entry in each column is empty
+    predictionLocations = cell(nRegionsAtFinestLevelForEachWorker, NUM_WORKERS, codistributionScheme);
 end
 %% Construct zeroth level
 xMin0 = domainBoundaries(1); xMax0 = domainBoundaries(2);
@@ -91,20 +74,16 @@ yMax0 = yMax0 + (offsetPercentage/2)*(yMax0 - yMin0);
 % Create the knots at the coarsest resolution
 [ knotsX, knotsY ] = create_knots(xMin0, xMax0, nKnotsX0, yMin0, yMax0, nKnotsY0, offsetPercentage);
 % Each branch at the coarsest resolution will have the same knots
-knots(1,1:nWorkersUsed) = {[knotsX(:), knotsY(:)]}; % Knots at coarsest resolution are part of the parental hierarchy for all branches
+knots(1,1:NUM_WORKERS) = {[knotsX(:), knotsY(:)]}; % Knots at coarsest resolution are part of the parental hierarchy for all branches
 % Create the paritition at the coarsest resolution
 [ xMin, xMax, yMin, yMax ] = create_partition(xMin0, xMax0, yMin0, yMax0, NUM_PARTITIONS_J);
 % Each branch at the coarest resolution will be contained within same
 % region
-partitions(1,1:nWorkersUsed) = {[ xMin, xMax, yMin, yMax ]};
+partitions(1,1:NUM_WORKERS) = {[ xMin, xMax, yMin, yMax ]};
 %% Create portion of partitions that has repeated entries across columns
-%vectorOfIndiciesForNonUniqueIndexMatrixRows = 1:NUM_PARTITIONS_J:nWorkersUsed;
-% LB: Be sure to check this condition for other test cases. 12/1:  Doesn't work.
-% Lb: Changing from sum(nRegions < nTilesAssignedToEachWorker) to sum(nRegions < nWorkersUsed)
-% 12/1 NEW ATTEMPT
 for iRow = 2:nRowsWithRepeatedEntriesInIndexMatrix
-    nTimesEachIndexIsRepeatedThisRow = nWorkersUsed/nRegions(iRow);
-    jBeginningColumnEntries = 1:nTimesEachIndexIsRepeatedThisRow:nWorkersUsed;
+    nTimesEachIndexIsRepeatedThisRow = NUM_WORKERS/nRegions(iRow);
+    jBeginningColumnEntries = 1:nTimesEachIndexIsRepeatedThisRow:NUM_WORKERS;
     parentsOfThisRow = unique(indexMatrix(iRow-1,:));
     columnToEnterMatrix = reshape(jBeginningColumnEntries, [], length(parentsOfThisRow));
     for jj = 1:length(parentsOfThisRow)
@@ -121,7 +100,7 @@ for iRow = 2:nRowsWithRepeatedEntriesInIndexMatrix
         for lPartition = 1:NUM_PARTITIONS_J
             % Get correct column to enter
             columnToEnter = columnToEnterMatrix(lPartition, jj);           
-            % Create knots & partitions for...WHAT????
+            % Create knots & partitions
             [knotsX,knotsY] = create_knots(xMin(lPartition), xMax(lPartition), nKnotsX, yMin(lPartition), yMax(lPartition), nKnotsY, offsetPercentage);
             [ xMinTemp, xMaxTemp, yMinTemp, yMaxTemp ] = create_partition(xMin(lPartition), xMax(lPartition), yMin(lPartition), yMax(lPartition), NUM_PARTITIONS_J);
             % Place knots partitions in array entries corresponding to
@@ -133,7 +112,7 @@ for iRow = 2:nRowsWithRepeatedEntriesInIndexMatrix
 end
 
 %% Create partitions and knots up until finestKnotLevel
-spmd(nWorkersUsed)
+spmd(NUM_WORKERS)
     for iIndex = nRowsWithRepeatedEntriesInIndexMatrix+1:indexOfFinestKnotLevelWithinIndexMatrix
         indexCurrent = indexMatrix(iIndex, labindex); % Assign (continuous) indexCurrent from indexMatrix.
         [~, ~, indexParent] = find_parent(indexCurrent, nRegions, NUM_PARTITIONS_J); % Find (continuous) parent of indexCurrent
@@ -161,7 +140,7 @@ end
 
 %% Special construct to find knots for finest resolution region
 if numVarArgs == 2 % If data is sent to build_structure_in_parallel
-    spmd(nWorkersUsed)
+    spmd(NUM_WORKERS)
         for iIndex = indexOfFinestKnotLevelWithinIndexMatrix + 1 : length(indexMatrix)
             mCounterIndex = iIndex - indexOfFinestKnotLevelWithinIndexMatrix; % Create a counter index to get into outputData and predictionLocations starting at index 1 to maintain minimal size
             indexCurrent = indexMatrix(iIndex, labindex); % Find the indexCurrent from indexMatrix
