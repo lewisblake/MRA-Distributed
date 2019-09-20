@@ -5,6 +5,8 @@ Software authors:
 Lewis Blake, Colorado School of Mines (lblake@mines.edu).
 Dorit Hammerling, Colorado School of Mines (hammerling@mines.edu).
 
+An associated technical report can be found at https://opensky.ucar.edu/islandora/object/technotes%3A579 .
+
 This code is based on the MRA model described in
 "A multi-resolution approximation for massive spatial datasets" by Matthias Katzfuss, 2017 in 
 the Journal of American Statistical Association (DOI: 10.1080/01621459.2015.1123632).
