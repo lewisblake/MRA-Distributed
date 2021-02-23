@@ -1,6 +1,6 @@
 # Multi-resolution approximation model, v1.0: Distributed Parallel Implementation
 
-Note: As of February 23, 2021 the Shallow-Tree MRA is depreicated. Users should instead use the [Deep-Tree MRA](https://github.com/lewisblake/DeepTreeMRA).
+Note: As of February 23, 2021 the Shallow-Tree MRA is depreciated. Users should instead use the [Deep-Tree MRA](https://github.com/lewisblake/DeepTreeMRA).
 
 March 11, 2019
 
